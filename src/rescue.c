@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include "deflate.h"
 
 #ifndef RESCUE_BOOTSTRAP
@@ -18,11 +17,15 @@
 #define MAX_PATH 2048
 
 #if defined(__OS2__) || defined(__WINDOWS__) || defined(WIN32) || defined(WIN64) || defined(_MSC_VER)
+#include <windows.h>
 #define PATH_DELIMITER '\\'
+#define IS_PATH_DELIMITER(C) ((C) == '\\' || (C) == '/')
 #define PWD(B, L) GetCurrentDirectory(L, B)
 #define ABSOLUTE_PATH(R, A, L) GetFullPathName(R, L, A, NULL)
 #else
+#include <unistd.h>
 #define PATH_DELIMITER '/'
+#define IS_PATH_DELIMITER(C) ((C) == '/')
 #define PWD(B, L) getcwd(B, L)
 #define ABSOLUTE_PATH(R, A, L) realpath(R, A)
 #endif
@@ -33,20 +36,20 @@
 
 #define PING {fprintf(stderr, "%s(%d): PING\n", __FILE__, __LINE__); }
 
-typedef struct {
+typedef struct compression_data {
     FILE* out;
     int line;
     int total;
 } compression_data;
 
-typedef struct {
+typedef struct source_data {
     FILE* out;
     char* placeholder;
     char* identifier;
     int state;
 } source_data;
 
-typedef struct {
+typedef struct resource_data {
     size_t inflated;
     size_t deflated;
     int metadata;
@@ -61,11 +64,11 @@ int path_join(const char* root, const char* path, char** out) {
     
     *out = (char*) malloc(sizeof(char) * (rlen+plen+2));
 
-	if (root[rlen-1] == PATH_DELIMITER)
+	if (IS_PATH_DELIMITER(root[rlen-1]))
     {
         strcpy(*out, root);
         strcpy(&((*out)[rlen]), path);
-    } else if (path[0] == PATH_DELIMITER)
+    } else if (IS_PATH_DELIMITER(path[0]))
     {
         strcpy(*out, path);
     }
@@ -88,7 +91,7 @@ int path_split(const char* path, char** parent, char** name) {
 
     for (i = len-1; i >= 0; i--)
     {
-        if (path[i] == PATH_DELIMITER)
+        if (IS_PATH_DELIMITER(path[i]))
         { 
             if (parent) { *parent = (char*) malloc(sizeof(char) * i); memcpy(*parent, path, i-1); (*parent)[i-1] = 0; }
             if (name) { *name = (char*) malloc(sizeof(char) * (len - i)); memcpy(*name, &(path[i+1]), len - i - 1); (*name)[len - i - 1] = 0; }
@@ -135,12 +138,11 @@ mz_bool compression_callback(const void* data, int len, void *user)
     }
 
     env->total += len;
-
+	return 1;
 }
 
 resource_data generate_resource(const char* filename, FILE* out) 
 {
-    int f;
     tdefl_compressor compressor;
     char buffer[BUFFER_SIZE];
 
@@ -163,8 +165,6 @@ resource_data generate_resource(const char* filename, FILE* out)
     tdefl_init(&compressor, &compression_callback, &cenv, TDEFL_MAX_PROBES_MASK);
 
     while (1) {
-        int i;
-
         size_t n = fread (buffer, sizeof(char), BUFFER_SIZE, fp);
 
         if (n < 1) break;
@@ -192,6 +192,7 @@ resource_data generate_resource(const char* filename, FILE* out)
     result.metadata = 1;
     result.inflated = length;
     result.deflated = cenv.total;
+	return result;
 }
 
 int source_callback(const void* data, int len, void *user)
@@ -402,8 +403,9 @@ int main(int argc, char** argv)
         }
 
         {
+			resource_data r = generate_resource(argv[i], out);
             VERBOSE("Generating resource from %s.\n", argv[i]);
-            resource_data r = generate_resource(argv[i], out);
+            
 
             if (r.deflated == -1)
             {
