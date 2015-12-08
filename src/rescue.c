@@ -148,7 +148,7 @@ resource_data generate_resource(const char* filename, FILE* out)
 
     resource_data result;
     compression_data cenv;
-    FILE* fp = fopen(filename, "r");
+    FILE* fp = fopen(filename, "rb");
     size_t length = 0;
 
     if (!fp)
@@ -244,7 +244,7 @@ int source_callback(const void* data, int len, void *user)
 int write_file(const char* source, data_callback callback, void* user)
 {
     char buffer[BUFFER_SIZE];
-    FILE* fp = fopen(source, "r");
+    FILE* fp = fopen(source, "rb");
     if (!fp)
         return 0;
     while (1) {
@@ -323,7 +323,7 @@ int main(int argc, char** argv)
                 continue;
             }
 
-            out = fopen(argv[++i], "w");
+            out = fopen(argv[++i], "wb");
 
             VERBOSE("Writing to file %s.\n", argv[i]);
 
