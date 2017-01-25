@@ -32,7 +32,7 @@
 
 #ifdef RESCUE_BOOTSTRAP
 #define BOOTSTRAP_WRITE(R, C, D) {char* path; path_join(RESCUE_BOOTSTRAP, R, &path); write_file(path, C, D); free(path);}
-#endif 
+#endif
 
 #define PING {fprintf(stderr, "%s(%d): PING\n", __FILE__, __LINE__); }
 
@@ -61,7 +61,7 @@ int path_join(const char* root, const char* path, char** out) {
 
     size_t rlen = strlen(root);
     size_t plen = strlen(root);
-    
+
     *out = (char*) malloc(sizeof(char) * (rlen+plen+2));
 
 	if (IS_PATH_DELIMITER(root[rlen-1]))
@@ -92,7 +92,7 @@ int path_split(const char* path, char** parent, char** name) {
     for (i = len-1; i >= 0; i--)
     {
         if (IS_PATH_DELIMITER(path[i]))
-        { 
+        {
             if (parent) { *parent = (char*) malloc(sizeof(char) * i); memcpy(*parent, path, i-1); (*parent)[i-1] = 0; }
             if (name) { *name = (char*) malloc(sizeof(char) * (len - i)); memcpy(*name, &(path[i+1]), len - i - 1); (*name)[len - i - 1] = 0; }
             return 1;
@@ -100,10 +100,10 @@ int path_split(const char* path, char** parent, char** name) {
     }
 
     if (name)
-    { 
+    {
         *name = (char*) malloc(sizeof(char) * (len+1));
         memcpy(*name, path, len);
-        (*name)[len] = 0; 
+        (*name)[len] = 0;
     }
 
     return 0;
@@ -115,17 +115,20 @@ mz_bool compression_callback(const void* data, int len, void *user)
     const char* buffer = (const char*) data;
     compression_data* env = (compression_data*) user;
 
-    for (i = 0; i < len; i++) 
+    for (i = 0; i < len; i++)
     {
         if (env->line == 0)
         {
             fprintf(env->out, "\n\"");
-        }            
+        }
 
         if (buffer[i] < 32 || buffer[i] == '"' || buffer[i] == '\\' || buffer[i] > 126) {
             fprintf(env->out, "\\%03o", (unsigned char)buffer[i]);
             env->line+=4;
-        } else {
+        } else if (i > 0 && buffer[i-1] == '?' && buffer[i] == '?') { // Avoiding trigraph warnings
+            fprintf(env->out, "\\?");
+            env->line+=2;
+		} else {
             fprintf(env->out, "%c", buffer[i]);
             env->line++;
         }
@@ -133,7 +136,7 @@ mz_bool compression_callback(const void* data, int len, void *user)
         if (env->line >= LINE_WIDTH) {
             fprintf(env->out, "\"");
             env->line = 0;
-        } 
+        }
 
     }
 
@@ -141,7 +144,7 @@ mz_bool compression_callback(const void* data, int len, void *user)
 	return 1;
 }
 
-resource_data generate_resource(const char* filename, FILE* out) 
+resource_data generate_resource(const char* filename, FILE* out)
 {
     tdefl_compressor compressor;
     char buffer[BUFFER_SIZE];
@@ -183,7 +186,7 @@ resource_data generate_resource(const char* filename, FILE* out)
 
     if (cenv.line < LINE_WIDTH && cenv.line != 0) {
         fprintf(out, "\"");
-    } 
+    }
 
     fprintf(out, ",\n");
 
@@ -309,7 +312,7 @@ int main(int argc, char** argv)
             if (argc == 2) help();
             continue;
 
-        } else if (strcmp(argv[i], "-o") == 0) 
+        } else if (strcmp(argv[i], "-o") == 0)
         {
             if (out != stdout)
             {
@@ -329,28 +332,28 @@ int main(int argc, char** argv)
 
             continue;
 
-        } else if (strcmp(argv[i], "-v") == 0) 
+        } else if (strcmp(argv[i], "-v") == 0)
         {
 
             verbose = 1;
 
             continue;
 
-        } else if (strcmp(argv[i], "-b") == 0) 
+        } else if (strcmp(argv[i], "-b") == 0)
         {
 
             naming_mode = NAMING_MODE_BASENAME;
 
             continue;
 
-        } else if (strcmp(argv[i], "-a") == 0) 
+        } else if (strcmp(argv[i], "-a") == 0)
         {
 
             naming_mode = NAMING_MODE_ABSOLUTE;
 
             continue;
 
-        } else if (strcmp(argv[i], "-r") == 0) 
+        } else if (strcmp(argv[i], "-r") == 0)
         {
 
             if ((i + 1) == argc)
@@ -364,7 +367,7 @@ int main(int argc, char** argv)
 
             continue;
 
-        } else if (strcmp(argv[i], "-p") == 0) 
+        } else if (strcmp(argv[i], "-p") == 0)
         {
 
             if ((i + 1) == argc)
@@ -384,7 +387,7 @@ int main(int argc, char** argv)
             continue;
         }
 
-        ctx.state = 0;    
+        ctx.state = 0;
         ctx.out = out;
         ctx.placeholder = PLACEHOLDER;
         ctx.identifier = identifier;
@@ -405,7 +408,7 @@ int main(int argc, char** argv)
         {
 			resource_data r = generate_resource(argv[i], out);
             VERBOSE("Generating resource from %s.\n", argv[i]);
-            
+
 
             if (r.deflated == -1)
             {
@@ -438,7 +441,7 @@ int main(int argc, char** argv)
                 }
 
             }
- 
+
         }
 
         processed_files++;
@@ -456,17 +459,17 @@ int main(int argc, char** argv)
         fprintf(out, " 0};\n");
 
         fprintf(out, "static const int %s_resource_metadata[] = {\n", identifier);
-        for (f = 0; f < processed_files; f++) 
+        for (f = 0; f < processed_files; f++)
                 fprintf(out, "%d,", resource_metadata[f]);
         fprintf(out, " 0};\n");
 
         fprintf(out, "static const size_t %s_resource_length_inflated[] = {\n", identifier);
-        for (f = 0; f < processed_files; f++) 
+        for (f = 0; f < processed_files; f++)
             fprintf(out, "%ld,", resource_length_inflated[f]);
         fprintf(out, " 0};\n");
 
         fprintf(out, "static const size_t %s_resource_length_deflated[] = {\n", identifier);
-        for (f = 0; f < processed_files; f++) 
+        for (f = 0; f < processed_files; f++)
             fprintf(out, "%ld,", resource_length_deflated[f]);
         fprintf(out, " 0};\n");
 
