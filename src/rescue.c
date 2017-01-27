@@ -14,6 +14,7 @@
 #define DEFAULT_IDENTIFIER "rescue"
 #define PLACEHOLDER "__RESCUE"
 #define LINE_WIDTH 80
+#define STRING_LENGTH (1024)
 #define MAX_PATH 2048
 
 #if defined(__OS2__) || defined(__WINDOWS__) || defined(WIN32) || defined(WIN64) || defined(_MSC_VER)
@@ -39,6 +40,7 @@
 typedef struct compression_data {
     FILE* out;
     int line;
+    int segment;
     int total;
 } compression_data;
 
@@ -62,9 +64,9 @@ int path_join(const char* root, const char* path, char** out) {
     size_t rlen = strlen(root);
     size_t plen = strlen(root);
 
-    *out = (char*) malloc(sizeof(char) * (rlen+plen+2));
+    *out = (char*) malloc(sizeof(char) * (rlen + plen + 2));
 
-	if (IS_PATH_DELIMITER(root[rlen-1]))
+    if (IS_PATH_DELIMITER(root[rlen - 1]))
     {
         strcpy(*out, root);
         strcpy(&((*out)[rlen]), path);
@@ -75,7 +77,7 @@ int path_join(const char* root, const char* path, char** out) {
     else {
         strcpy(*out, root);
         (*out)[rlen] = PATH_DELIMITER;
-        strcpy(&((*out)[rlen+1]), path);
+        strcpy(&((*out)[rlen + 1]), path);
     }
 
     return 1;
@@ -89,19 +91,19 @@ int path_split(const char* path, char** parent, char** name) {
     if (len < 2)
         return 0;
 
-    for (i = len-1; i >= 0; i--)
+    for (i = len - 1; i >= 0; i--)
     {
         if (IS_PATH_DELIMITER(path[i]))
         {
-            if (parent) { *parent = (char*) malloc(sizeof(char) * i); memcpy(*parent, path, i-1); (*parent)[i-1] = 0; }
-            if (name) { *name = (char*) malloc(sizeof(char) * (len - i)); memcpy(*name, &(path[i+1]), len - i - 1); (*name)[len - i - 1] = 0; }
+            if (parent) { *parent = (char*) malloc(sizeof(char) * i); memcpy(*parent, path, i - 1); (*parent)[i - 1] = 0; }
+            if (name) { *name = (char*) malloc(sizeof(char) * (len - i)); memcpy(*name, &(path[i + 1]), len - i - 1); (*name)[len - i - 1] = 0; }
             return 1;
         }
     }
 
     if (name)
     {
-        *name = (char*) malloc(sizeof(char) * (len+1));
+        *name = (char*) malloc(sizeof(char) * (len + 1));
         memcpy(*name, path, len);
         (*name)[len] = 0;
     }
@@ -114,6 +116,7 @@ mz_bool compression_callback(const void* data, int len, void *user)
     int i;
     const char* buffer = (const char*) data;
     compression_data* env = (compression_data*) user;
+    int l = env->total;
 
     for (i = 0; i < len; i++)
     {
@@ -124,16 +127,19 @@ mz_bool compression_callback(const void* data, int len, void *user)
 
         if (buffer[i] < 32 || buffer[i] == '"' || buffer[i] == '\\' || buffer[i] > 126) {
             fprintf(env->out, "\\%03o", (unsigned char)buffer[i]);
-            env->line+=4;
-        } else if (i > 0 && buffer[i-1] == '?' && buffer[i] == '?') { // Avoiding trigraph warnings
+            env->line += 4;
+        } else if (i > 0 && buffer[i - 1] == '?' && buffer[i] == '?') { // Avoiding trigraph warnings
             fprintf(env->out, "\\?");
-            env->line+=2;
-		} else {
+            env->line += 2;
+        } else {
             fprintf(env->out, "%c", buffer[i]);
             env->line++;
         }
 
-        if (env->line >= LINE_WIDTH) {
+        if (l > 0 && ((i + l + 1) % STRING_LENGTH == 0)) {
+            fprintf(env->out, "\",");
+            env->line = 0;
+        } else if (env->line >= LINE_WIDTH) {
             fprintf(env->out, "\"");
             env->line = 0;
         }
@@ -141,7 +147,7 @@ mz_bool compression_callback(const void* data, int len, void *user)
     }
 
     env->total += len;
-	return 1;
+    return 1;
 }
 
 resource_data generate_resource(const char* filename, FILE* out)
@@ -156,8 +162,8 @@ resource_data generate_resource(const char* filename, FILE* out)
 
     if (!fp)
     {
-        result.inflated=-1;
-        result.deflated=-1;
+        result.inflated = -1;
+        result.deflated = -1;
         return result;
     }
 
@@ -188,14 +194,15 @@ resource_data generate_resource(const char* filename, FILE* out)
         fprintf(out, "\"");
     }
 
-    fprintf(out, ",\n");
+    if ((cenv.total) % STRING_LENGTH != 0)
+        fprintf(out, ",\n");
 
     fclose(fp);
 
     result.metadata = 1;
     result.inflated = length;
     result.deflated = cenv.total;
-	return result;
+    return result;
 }
 
 int source_callback(const void* data, int len, void *user)
@@ -242,6 +249,8 @@ int source_callback(const void* data, int len, void *user)
         }
         i++;
     }
+
+    return 1;
 }
 
 int write_file(const char* source, data_callback callback, void* user)
@@ -402,12 +411,15 @@ int main(int argc, char** argv)
             BOOTSTRAP_WRITE("inflate.c", &source_callback, &ctx);
 #endif
             fprintf(out, "#ifndef %s_header_only\n", identifier);
-            fprintf(out, "static const unsigned char* %s_resource_data[] = {", identifier);
+
         }
 
         {
-			resource_data r = generate_resource(argv[i], out);
+            fprintf(out, "static const char* %s_resource_data_%d[] = {", identifier, processed_files);
+
             VERBOSE("Generating resource from %s.\n", argv[i]);
+            resource_data r = generate_resource(argv[i], out);
+            fprintf(out, " 0};\n");
 
 
             if (r.deflated == -1)
@@ -419,7 +431,7 @@ int main(int argc, char** argv)
                 resource_length_inflated[processed_files] = r.inflated;
                 resource_length_deflated[processed_files] = r.deflated;
                 resource_metadata[processed_files] = r.metadata;
-                switch(naming_mode)
+                switch (naming_mode)
                 {
                 case NAMING_MODE_BASENAME:
                 {
@@ -452,7 +464,11 @@ int main(int argc, char** argv)
     {
         int f;
 
+        fprintf(out, "static const char** %s_resource_data[] = {", identifier);
+        for (f = 0; f < processed_files; f++)
+            fprintf(out, "%s_resource_data_%d,", identifier, f);
         fprintf(out, " 0};\n");
+
         fprintf(out, "static const char* %s_resource_names[] = {\n", identifier);
         for (f = 0; f < processed_files; f++)
             fprintf(out, "\"%s\",", resource_names[f]);
@@ -460,7 +476,7 @@ int main(int argc, char** argv)
 
         fprintf(out, "static const int %s_resource_metadata[] = {\n", identifier);
         for (f = 0; f < processed_files; f++)
-                fprintf(out, "%d,", resource_metadata[f]);
+            fprintf(out, "%d,", resource_metadata[f]);
         fprintf(out, " 0};\n");
 
         fprintf(out, "static const size_t %s_resource_length_inflated[] = {\n", identifier);
@@ -480,6 +496,8 @@ int main(int argc, char** argv)
         for (f = 0; f < processed_files; f++)
             free(resource_names[f]);
         free(resource_names);
+
+        fprintf(out, "#define %s_SEGMENT_LENGTH (%d)\n", identifier, STRING_LENGTH),
 
         fprintf(out, "#endif\n");
 
